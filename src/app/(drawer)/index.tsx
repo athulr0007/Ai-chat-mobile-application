@@ -5,8 +5,7 @@ import {
   StyleSheet, 
   TextInput, 
   TouchableOpacity, 
-  FlatList, 
-  SafeAreaView, 
+  FlatList,  
   Dimensions, 
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -33,6 +32,7 @@ import ChatBubble from '../../components/ChatBubble';
 import TypingIndicator from '../../components/TypingIndicator';
 import SkeletonLoader from '../../components/SkeletonLoader';
 // import VoiceWaveform from '../../components/VoiceWaveform';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = width * 0.78;
@@ -455,8 +455,15 @@ export default function ChatScreen() {
         />
       )}
 
-      <Animated.View style={[styles.drawer, { backgroundColor: activeColors.card }, drawerAnimatedStyle]}>
-        <SafeAreaView style={styles.drawerSafe}>
+{isDrawerOpen && (
+  <Animated.View
+    style={[
+      styles.drawer,
+      { backgroundColor: activeColors.card },
+      drawerAnimatedStyle,
+    ]}
+  >
+         <SafeAreaView style={styles.drawerSafe}>
           {/* New Chat Button */}
           <TouchableOpacity 
             onPress={handleNewChat}
@@ -550,10 +557,9 @@ export default function ChatScreen() {
             </View>
           )}
         </SafeAreaView>
-      </Animated.View>
+</Animated.View>
+)}
 
-      {/* 6. Sound Waves pulsating full screen overlay during microphone recording */}
-      {/* {isRecording && <VoiceWaveform />} */}
 
     </SafeAreaView>
   );
@@ -563,21 +569,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    height: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.four,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  headerButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+ header: {
+  minHeight: 64,
+  paddingTop: 10,
+  paddingBottom: 6,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  paddingHorizontal: Spacing.four,
+  borderBottomWidth: StyleSheet.hairlineWidth,
+},
+headerButton: {
+  width: 42,
+  height: 42,
+  borderRadius: 21,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
   headerTitleContainer: {
     alignItems: 'center',
   },
@@ -671,12 +679,12 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: DRAWER_WIDTH,
-    zIndex: 95,
+    zIndex: 1000,
+    elevation: 40,   
     shadowColor: '#000',
     shadowOffset: { width: 4, height: 0 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
-    elevation: 16,
   },
   drawerSafe: {
     flex: 1,

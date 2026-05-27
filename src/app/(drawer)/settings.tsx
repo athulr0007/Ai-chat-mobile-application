@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity,  Alert, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { Colors, Spacing, Typography, Layout } from '../../constants/theme';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -46,7 +47,7 @@ export default function SettingsScreen() {
           <Ionicons name="arrow-back-outline" size={24} color={activeColors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: activeColors.text }]}>Settings</Text>
-        <View style={{ width: 36 }} /> {/* Visual spacer */}
+        <View style={{ width: 36 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
