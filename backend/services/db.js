@@ -21,10 +21,10 @@ const DbService = {
       }
       return mockDb.users.find(u => u.email === email.toLowerCase()) || null;
     },
-    create: async ({ name, email, avatar }) => {
+    create: async ({ name, email, password, provider, avatar, }) => {
       if (isConnected()) {
         const User = require('../models/User');
-        const user = new User({ name, email, avatar });
+        const user = new User({ name, email, password, provider, avatar, });
         return await user.save();
       }
       const newUser = {
@@ -32,6 +32,8 @@ const DbService = {
         _id: crypto.randomBytes(12).toString('hex'),
         name,
         email: email.toLowerCase(),
+        password,
+         provider,
         avatar,
         createdAt: new Date()
       };

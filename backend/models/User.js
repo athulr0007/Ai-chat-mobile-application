@@ -5,6 +5,7 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+
   email: {
     type: String,
     required: true,
@@ -12,10 +13,21 @@ const UserSchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
   },
+
+  password: {
+  type: String,
+  default: null,
+},
+provider: {
+  type: String,
+  enum: ['local', 'google'],
+  default: 'local',
+},
   avatar: {
     type: String,
     default: '',
   },
+
   createdAt: {
     type: Date,
     default: Date.now,
@@ -23,3 +35,4 @@ const UserSchema = new mongoose.Schema({
 });
 
 module.exports = mongoose.model('User', UserSchema);
+

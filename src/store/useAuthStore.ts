@@ -8,15 +8,36 @@ export interface UserProfile {
   avatar: string;
 }
 
+
 interface AuthState {
   token: string | null;
   user: UserProfile | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, name: string, avatar?: string) => Promise<boolean>;
+
+  login: (
+    email: string,
+    password: string
+  ) => Promise<boolean>;
+
+  register: (
+    name: string,
+    email: string,
+    password: string
+  ) => Promise<boolean>;
+
+  googleLogin: (
+    email: string,
+    name: string,
+    avatar?: string
+  ) => Promise<boolean>;
+
   logout: () => Promise<void>;
+
   initializeAuth: () => Promise<void>;
 }
+
+
 
 // Configurable Backend API host (Change to match development host)
 // export const BACKEND_URL = 'http://localhost:5000';
@@ -28,41 +49,159 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: true,
 
-  login: async (email: string, name: string, avatar?: string) => {
-    set({ isLoading: true });
-    try {
-      // Call mock or real backend auth endpoint
-      const response = await fetch(`${BACKEND_URL}/auth/google`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, name, avatar }),
-      });
 
-      if (!response.ok) {
-        throw new Error("Authentication failed on backend");
-      }
+login: async (email: string, password: string) => {
+  set({ isLoading: true });
 
-      const data = await response.json();
+  try {
+    const response = await fetch(`${BACKEND_URL}/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        password,
+      }),
+    });
 
-      // Save to AsyncStorage
-      await AsyncStorage.setItem("eye1_token", data.token);
-      await AsyncStorage.setItem("eye1_user", JSON.stringify(data.user));
+    const data = await response.json();
 
-      set({
-        token: data.token,
-        user: data.user,
-        isAuthenticated: true,
-        isLoading: false,
-      });
-      return true;
-    } catch (err) {
-      console.error("Login Store Error:", err);
-      set({ isLoading: false });
-      return false;
+    if (!response.ok) {
+      throw new Error(data.msg || 'Login failed');
     }
-  },
+
+    await AsyncStorage.setItem('eye1_token', data.token);
+
+    await AsyncStorage.setItem(
+      'eye1_user',
+      JSON.stringify(data.user)
+    );
+
+    set({
+      token: data.token,
+      user: data.user,
+      isAuthenticated: true,
+      isLoading: false,
+    });
+
+    return true;
+  } catch (err) {
+    console.error('Login Error:', err);
+
+    set({
+      isLoading: false,
+    });
+
+    return false;
+  }
+},
+
+register: async (
+  name: string,
+  email: string,
+  password: string
+) => {
+  set({ isLoading: true });
+
+  try {
+    const response = await fetch(`${BACKEND_URL}/auth/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name,
+        email,
+        password,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.msg || 'Register failed');
+    }
+
+    await AsyncStorage.setItem('eye1_token', data.token);
+
+    await AsyncStorage.setItem(
+      'eye1_user',
+      JSON.stringify(data.user)
+    );
+
+    set({
+      token: data.token,
+      user: data.user,
+      isAuthenticated: true,
+      isLoading: false,
+    });
+
+    return true;
+  } catch (err) {
+    console.error('Register Error:', err);
+
+    set({
+      isLoading: false,
+    });
+
+    return false;
+  }
+},
+
+googleLogin: async (
+  email: string,
+  name: string,
+  avatar?: string
+) => {
+  set({ isLoading: true });
+
+  try {
+    const response = await fetch(`${BACKEND_URL}/auth/google`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        name,
+        avatar,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.msg || 'Google login failed');
+    }
+
+    await AsyncStorage.setItem('eye1_token', data.token);
+
+    await AsyncStorage.setItem(
+      'eye1_user',
+      JSON.stringify(data.user)
+    );
+
+    set({
+      token: data.token,
+      user: data.user,
+      isAuthenticated: true,
+      isLoading: false,
+    });
+
+    return true;
+  } catch (err) {
+    console.error('Google Login Error:', err);
+
+    set({
+      isLoading: false,
+    });
+
+    return false;
+  }
+},
+
+
 
   logout: async () => {
     try {

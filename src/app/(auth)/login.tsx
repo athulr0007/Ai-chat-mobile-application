@@ -47,19 +47,20 @@ export default function LoginScreen() {
       setErrorMessage('');
       setIsLoading(true);
 
-      // Temporary mock auth until backend login API is completed
-      const success = await login(
-        email,
-        'EYE 1 User',
-        `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`
-      );
+     
+const success = await login(
+  email,
+  password
+);
+
+
 
       setIsLoading(false);
 
       if (success) {
         router.replace('/(drawer)');
       } else {
-        setErrorMessage('Invalid credentials or backend unavailable.');
+        setErrorMessage('Invalid email or password');
       }
     } catch (err) {
       setIsLoading(false);

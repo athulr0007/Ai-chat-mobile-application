@@ -27,7 +27,7 @@ import {
 export default function RegisterScreen() {
   const router = useRouter();
 
-  const { login } = useAuthStore();
+  const { register } = useAuthStore();
   const { getIsDark } = useThemeStore();
 
   const isDark = getIsDark();
@@ -61,14 +61,7 @@ export default function RegisterScreen() {
       setErrorMessage('');
       setIsLoading(true);
 
-      // Temporary mock auth until backend register API is added
-      const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`;
-
-      const success = await login(
-        email,
-        name,
-        avatar
-      );
+      const success = await register( name, email, password );
 
       setIsLoading(false);
 
