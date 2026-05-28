@@ -6,7 +6,9 @@ import Animated, {
   useAnimatedStyle, 
   withTiming, 
   withDelay, 
-  Easing,
+  Easing, 
+  withSequence, 
+  withRepeat,
   runOnJS
 } from 'react-native-reanimated';
 import { useAuthStore } from '../store/useAuthStore';
@@ -69,12 +71,7 @@ export default function SplashScreen() {
 
     // Final Iris Expand Reveal & Route Redirect
     const redirect = () => {
-      const auth = useAuthStore.getState();
-      if (auth.isAuthenticated) {
-        router.replace('/(drawer)');
-      } else {
-        router.replace('/(auth)/login');
-      }
+      router.replace(useAuthStore.getState().isAuthenticated ? '/(drawer)' : '/(auth)/welcome');
     };
 
     irisScale.value = withDelay(2100, withTiming(15, { 
@@ -109,7 +106,7 @@ export default function SplashScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: activeColors.background }]}>
-      {/* Background Starry Particles */}
+      {/* Background Starry Particles (Static Ambient Theme) */}
       <View style={StyleSheet.absoluteFill}>
         {[...Array(20)].map((_, i) => (
           <View
@@ -227,12 +224,16 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
   },
   particle: {
     position: 'absolute',
     width: 6,
     height: 6,
     borderRadius: 3,
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
   },
   ambientStar: {
     position: 'absolute',

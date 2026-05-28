@@ -9,6 +9,8 @@ import {
   Dimensions, 
   ActivityIndicator,
   KeyboardAvoidingView,
+  Keyboard,
+  KeyboardEvent,
   Platform,
   Alert
 } from 'react-native';
@@ -333,6 +335,8 @@ export default function ChatScreen() {
 
   const activeMessagesList = getActiveChatMessages();
 
+ 
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: activeColors.background }]}>
       
@@ -357,8 +361,8 @@ export default function ChatScreen() {
       {/* 2. Main Chat Conversation List */}
       <KeyboardAvoidingView
         style={styles.keyboardContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         {activeMessagesList.length === 0 && !isAiThinking  ? (
           <View style={styles.emptyContainer}>
@@ -378,6 +382,7 @@ export default function ChatScreen() {
             data={activeMessagesList}
             keyExtractor={(item) => item._id}
             contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
               <ChatBubble
                 role={item.role}
@@ -404,46 +409,61 @@ export default function ChatScreen() {
           </View>
         )} */}
 
-        {/* 4. Footer Message Inputs Bar */}
-        <View style={[styles.inputBar, { borderTopColor: activeColors.border, backgroundColor: activeColors.background }]}>
-          <View style={[styles.inputWrapper, { backgroundColor: activeColors.inputBackground, borderColor: activeColors.border }]}>
-            <TextInput
-              style={[styles.textInput, { color: activeColors.text }]}
-              value={inputText}
-              onChangeText={setInputText}
-              placeholder="Message EYE 1..."
-              placeholderTextColor={activeColors.textMuted}
-              multiline
-              editable={!isAiStreaming}
-            />
+{/* 4. Footer Message Inputs Bar */}
+<View
+  style={[
+    styles.inputBar,
+    {
+      borderTopColor: activeColors.border,
+      backgroundColor: activeColors.background,
+    },
+  ]}
+>
+  <View
+    style={[
+      styles.inputWrapper,
+      {
+        backgroundColor: activeColors.inputBackground,
+        borderColor: activeColors.border,
+      },
+    ]}
+  >
+    <TextInput
+      style={[styles.textInput, { color: activeColors.text }]}
+      value={inputText}
+      onChangeText={setInputText}
+      placeholder="Message EYE 1..."
+      placeholderTextColor={activeColors.textMuted}
+      multiline
+      editable={!isAiStreaming}
+    />
+  </View>
 
-            {/* Voice hold-to-record microphone trigger */}
-          </View>
-
-          {/* Send or Stop button depending on stream state */}
-          {isAiStreaming ? (
-            <TouchableOpacity 
-              onPress={handleStopStreaming} 
-              style={[styles.sendButton, { backgroundColor: '#EF4444' }]}
-            >
-              <Ionicons name="stop" size={18} color="#FFF" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              onPress={() => handleSendMessage()}
-              disabled={!inputText.trim()}
-              style={[
-                styles.sendButton,
-                { 
-                  backgroundColor: inputText.trim() ? activeColors.primary : activeColors.border,
-                  opacity: inputText.trim() ? 1 : 0.6
-                }
-              ]}
-            >
-              <Ionicons name="arrow-up" size={18} color="#FFF" />
-            </TouchableOpacity>
-          )}
-        </View>
+  {isAiStreaming ? (
+    <TouchableOpacity
+      onPress={handleStopStreaming}
+      style={[styles.sendButton, { backgroundColor: '#EF4444' }]}
+    >
+      <Ionicons name="stop" size={18} color="#FFF" />
+    </TouchableOpacity>
+  ) : (
+    <TouchableOpacity
+      onPress={() => handleSendMessage()}
+      disabled={!inputText.trim()}
+      style={[
+        styles.sendButton,
+        {
+          backgroundColor: inputText.trim()
+            ? activeColors.primary
+            : activeColors.border,
+          opacity: inputText.trim() ? 1 : 0.6,
+        },
+      ]}
+    >
+      <Ionicons name="arrow-up" size={18} color="#FFF" />
+    </TouchableOpacity>
+  )}
+</View>
       </KeyboardAvoidingView>
 
       {/* 5. Custom Slide-out Left Drawer Overlay */}
@@ -635,11 +655,12 @@ headerButton: {
   inputBar: {
     paddingHorizontal: Spacing.four,
     paddingVertical: Spacing.three,
+    paddingBottom: Platform.OS === 'ios' ? 8 : 4,
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: Spacing.two,
     borderTopWidth: StyleSheet.hairlineWidth,
-  },
+},
   inputWrapper: {
     flex: 1,
     flexDirection: 'row',
