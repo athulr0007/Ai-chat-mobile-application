@@ -153,7 +153,7 @@ export default function SettingsScreen() {
   const systemInfo = [
     { label: 'App Version',  value: '1.0.0 (Release)',           icon: 'cube-outline' },
     { label: 'AI Model',     value: 'llama-3.1-8b-instant',      icon: 'sparkles-outline' },
-    { label: 'Voice STT',    value: 'whisper-large-v3',           icon: 'mic-outline' },
+    { label: 'Voice STT',    value: 'Coming Soon',           icon: 'mic-outline' },
     { label: 'Speech TTS',   value: 'expo-speech (Native)',       icon: 'volume-medium-outline' },
     { label: 'Runtime',      value: 'React Native · Expo SDK 56', icon: 'layers-outline' },
   ];

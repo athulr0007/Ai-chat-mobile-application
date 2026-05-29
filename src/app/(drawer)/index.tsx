@@ -1,28 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TextInput, 
-  TouchableOpacity, 
-  FlatList,  
-  Dimensions, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  Dimensions,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Keyboard,
-  KeyboardEvent,
   Platform,
-  Alert
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import Animated, { 
-  useSharedValue, 
-  useAnimatedStyle, 
-  withTiming, 
-  Easing 
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
 } from 'react-native-reanimated';
-// import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuthStore } from '../../store/useAuthStore';
@@ -33,7 +30,6 @@ import { ApiService, ChatSession, ChatMessage } from '../../services/api';
 import ChatBubble from '../../components/ChatBubble';
 import TypingIndicator from '../../components/TypingIndicator';
 import SkeletonLoader from '../../components/SkeletonLoader';
-// import VoiceWaveform from '../../components/VoiceWaveform';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
@@ -48,33 +44,42 @@ export default function ChatScreen() {
   const isDark = getIsDark();
   const activeColors = isDark ? Colors.dark : Colors.light;
 
-  // Navigation / Drawer state
+  // ─── Session state ────────────────────────────────────────────────────────
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  /**
+   * localMessages holds messages ONLY during the "null → real-session"
+   * transition (i.e. the very first message of a brand-new chat).
+   * Once the backend hands us a real sessionId we keep appending here
+   * until streaming finishes, then we flush to React Query and clear this.
+   */
+  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
+
+  // Drawer
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerX = useSharedValue(-DRAWER_WIDTH);
 
-  // Input & Streaming states
+  // Input & streaming
   const [inputText, setInputText] = useState('');
   const [isAiStreaming, setIsAiStreaming] = useState(false);
-  const [streamingTokens, setStreamingTokens] = useState('');
-  const [isAiThinking, setIsAiThinking] = useState(false); // Trigger for Skeleton loader
-  
-  // Voice Recording states
-  // const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  // const [isRecording, setIsRecording] = useState(false);
-  // const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isAiThinking, setIsAiThinking] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const abortStreamRef = useRef<(() => void) | null>(null);
 
-  // Redirection guard
+  /**
+   * pendingSessionId is set as soon as the backend metadata callback fires.
+   * We store it in a ref so the streaming token callback can read the latest
+   * value synchronously without a stale closure.
+   */
+  const pendingSessionIdRef = useRef<string | null>(null);
+
+  // ─── Auth guard ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!token) {
-      router.replace('/(auth)/login');
-    }
+    if (!token) router.replace('/(auth)/login');
   }, [token]);
 
-  // Toggle Custom Drawer
+  // ─── Drawer ───────────────────────────────────────────────────────────────
   const toggleDrawer = (open: boolean) => {
     setIsDrawerOpen(open);
     drawerX.value = withTiming(open ? 0 : -DRAWER_WIDTH, {
@@ -83,269 +88,275 @@ export default function ChatScreen() {
     });
   };
 
-  // Queries
+  // ─── Queries ──────────────────────────────────────────────────────────────
   const { data: sessions = [], isLoading: isLoadingSessions } = useQuery<ChatSession[]>({
     queryKey: ['sessions'],
     queryFn: ApiService.getSessions,
     enabled: !!token,
   });
 
-  const { data: messages = [], isLoading: isLoadingMessages } = useQuery<ChatMessage[]>({
+  const { data: serverMessages = [], isLoading: isLoadingMessages } = useQuery<ChatMessage[]>({
     queryKey: ['messages', activeSessionId],
     queryFn: () => ApiService.getMessages(activeSessionId!),
     enabled: !!token && !!activeSessionId,
   });
 
-  // Mutations
+  // ─── Mutations ────────────────────────────────────────────────────────────
   const deleteSessionMutation = useMutation({
     mutationFn: ApiService.deleteSession,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      if (activeSessionId) {
-        setActiveSessionId(null);
-      }
+      if (activeSessionId) setActiveSessionId(null);
     },
-    onError: () => {
-      Alert.alert('Error', 'Failed to delete chat session.');
-    }
+    onError: () => Alert.alert('Error', 'Failed to delete chat session.'),
   });
 
-  // Scroll to bottom helper
+  // ─── Helpers ──────────────────────────────────────────────────────────────
   const scrollToBottom = (delay = 100) => {
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, delay);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), delay);
   };
 
   useEffect(() => {
-    if (messages.length > 0) {
-      scrollToBottom();
-    }
-  }, [messages.length]);
+    if (serverMessages.length > 0) scrollToBottom();
+  }, [serverMessages.length]);
 
-  // Stream Message handler
+  // ─── Decide which list to render ──────────────────────────────────────────
+  /**
+   * Rules:
+   *  • No active session yet  → always use localMessages (new-chat flow)
+   *  • Active session exists  → use serverMessages from React Query
+   *    (localMessages will be empty by the time we get here because we clear
+   *    them on stream-complete)
+   */
+  const displayMessages: ChatMessage[] =
+    activeSessionId === null ? localMessages : serverMessages;
+
+  // ─── Send / Stream ────────────────────────────────────────────────────────
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputText).trim();
     if (!text || isAiStreaming) return;
 
     setInputText('');
     setIsAiThinking(true);
-    setStreamingTokens('');
     setIsAiStreaming(true);
-    scrollToBottom(50);
 
-    // Save prompt message immediately in query cache for instant layout rendering (Optimistic UI update)
-    const tempUserMessage: ChatMessage = {
-      _id: 'temp-user-msg-' + Date.now(),
-      sessionId: activeSessionId || 'new-session',
-      role: 'user',
-      content: text,
-      createdAt: new Date().toISOString(),
-    };
-    
-    // Add user message locally
-    queryClient.setQueryData<ChatMessage[]>(['messages', activeSessionId], (old = []) => [
-      ...old,
-      tempUserMessage,
-    ]);
-    scrollToBottom(50);
+    const isNewChat = activeSessionId === null;
 
-    // Stream SSE AI connection
-    let sessionCreated = false;
-    
-    const abort = ApiService.streamChat(
-      activeSessionId,
-      text,
-      // onToken
-      (token) => {
-        setIsAiThinking(false); // Stop skeleton loader immediately when first token arrives
-        setStreamingTokens((prev) => {
-          const updated = prev + token;
+    if (isNewChat) {
+      // ── NEW CHAT: work entirely in localMessages ──────────────────────────
+      pendingSessionIdRef.current = null;
+
+      const userMsg: ChatMessage = {
+        _id: 'temp-user-' + Date.now(),
+        sessionId: 'new-session',
+        role: 'user',
+        content: text,
+        createdAt: new Date().toISOString(),
+      };
+      const assistantMsg: ChatMessage = {
+        _id: 'streaming-message',
+        sessionId: 'new-session',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Single atomic update → no flicker
+      setLocalMessages([userMsg, assistantMsg]);
+      scrollToBottom(50);
+
+      const abort = ApiService.streamChat(
+        null,
+        text,
+        // onToken
+        (token) => {
+          setIsAiThinking(false);
+          setLocalMessages((prev) =>
+            prev.map((m) =>
+              m._id === 'streaming-message' ? { ...m, content: m.content + token } : m
+            )
+          );
           scrollToBottom(10);
-          return updated;
-        });
-      },
-      // onMetadata (Triggered when new session is auto-created on backend)
-      (metadata) => {
-        sessionCreated = true;
-        setActiveSessionId(metadata.sessionId);
-        queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      },
-      // onComplete
-      () => {
-        setIsAiStreaming(false);
-        setIsAiThinking(false);
-        setStreamingTokens('');
-        // Sync full messages from DB
-        queryClient.invalidateQueries({ queryKey: ['messages', activeSessionId] });
-        queryClient.invalidateQueries({ queryKey: ['sessions'] });
-        scrollToBottom(100);
-      },
-      // onError
-      (error) => {
-        setIsAiStreaming(false);
-        setIsAiThinking(false);
-        setStreamingTokens('');
-        Alert.alert('Streaming Error', error);
-      }
-    );
+        },
+        // onMetadata – backend just created the real session
+        (metadata) => {
+          pendingSessionIdRef.current = metadata.sessionId;
+          // Restamp our local messages with the real sessionId so they
+          // look consistent before React Query takes over.
+          setLocalMessages((prev) =>
+            prev.map((m) => ({ ...m, sessionId: metadata.sessionId }))
+          );
+          queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        },
+        // onComplete
+        () => {
+          const realSessionId = pendingSessionIdRef.current;
 
-    abortStreamRef.current = abort;
-  };
+          if (realSessionId) {
+            // Push the fully-streamed local messages into React Query cache
+            // so the transition is seamless (no empty flash).
+            setLocalMessages((currentLocal) => {
+              queryClient.setQueryData<ChatMessage[]>(
+                ['messages', realSessionId],
+                currentLocal
+              );
+              return currentLocal; // keep displaying while query hydrates
+            });
 
-  // Stop active streaming manually
-  const handleStopStreaming = () => {
-    if (abortStreamRef.current) {
-      abortStreamRef.current();
-      setIsAiStreaming(false);
-      setIsAiThinking(false);
-      setStreamingTokens('');
-      queryClient.invalidateQueries({ queryKey: ['messages', activeSessionId] });
+            // Switch to server-driven state
+            setActiveSessionId(realSessionId);
+
+            // Fetch authoritative messages from server (replaces cache above)
+            queryClient.invalidateQueries({ queryKey: ['messages', realSessionId] });
+            queryClient.invalidateQueries({ queryKey: ['sessions'] });
+
+            // Clear local buffer AFTER a tick so displayMessages never
+            // shows an empty list during the session-id switch.
+            setTimeout(() => setLocalMessages([]), 0);
+          }
+
+          setIsAiStreaming(false);
+          setIsAiThinking(false);
+          pendingSessionIdRef.current = null;
+          scrollToBottom(100);
+        },
+        // onError
+        (error) => {
+          setIsAiStreaming(false);
+          setIsAiThinking(false);
+          setLocalMessages([]);
+          pendingSessionIdRef.current = null;
+          Alert.alert('Streaming Error', error);
+        }
+      );
+
+      abortStreamRef.current = abort;
+    } else {
+      // ── EXISTING CHAT: optimistic update directly in React Query ─────────
+      const sessionId = activeSessionId;
+
+      const userMsg: ChatMessage = {
+        _id: 'temp-user-' + Date.now(),
+        sessionId,
+        role: 'user',
+        content: text,
+        createdAt: new Date().toISOString(),
+      };
+      const assistantMsg: ChatMessage = {
+        _id: 'streaming-message',
+        sessionId,
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      };
+
+      queryClient.setQueryData<ChatMessage[]>(['messages', sessionId], (old = []) => [
+        ...old,
+        userMsg,
+        assistantMsg,
+      ]);
+      scrollToBottom(50);
+
+      const abort = ApiService.streamChat(
+        sessionId,
+        text,
+        // onToken
+        (token) => {
+          setIsAiThinking(false);
+          queryClient.setQueryData<ChatMessage[]>(['messages', sessionId], (old = []) =>
+            old.map((m) =>
+              m._id === 'streaming-message' ? { ...m, content: m.content + token } : m
+            )
+          );
+          scrollToBottom(10);
+        },
+        // onMetadata (no-op for existing sessions)
+        (_metadata) => {},
+        // onComplete
+        () => {
+          setIsAiStreaming(false);
+          setIsAiThinking(false);
+          queryClient.invalidateQueries({ queryKey: ['messages', sessionId] });
+          queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          scrollToBottom(100);
+        },
+        // onError
+        (error) => {
+          setIsAiStreaming(false);
+          setIsAiThinking(false);
+          Alert.alert('Streaming Error', error);
+        }
+      );
+
+      abortStreamRef.current = abort;
     }
   };
 
-  // Audio Recording handlers (Speech-to-Text integration)
-  // const startRecording = async () => {
-  //   try {
-  //     // 1. Request microphone permission
-  //     const permission = await Audio.requestPermissionsAsync();
-  //     if (permission.status !== 'granted') {
-  //       Alert.alert('Permission Denied', 'Microphone permissions are required for voice transcribing.');
-  //       return;
-  //     }
+  // ─── Stop streaming ───────────────────────────────────────────────────────
+  const handleStopStreaming = () => {
+    if (abortStreamRef.current) {
+      abortStreamRef.current();
+      abortStreamRef.current = null;
+    }
+    setIsAiStreaming(false);
+    setIsAiThinking(false);
 
-  //     // 2. Configure audio settings
-  //     await Audio.setAudioModeAsync({
-  //       allowsRecordingIOS: true,
-  //       playsInSilentModeIOS: true,
-  //     });
+    if (activeSessionId) {
+      queryClient.invalidateQueries({ queryKey: ['messages', activeSessionId] });
+    } else {
+      // Aborted before session was created – just clear local buffer
+      setLocalMessages([]);
+      pendingSessionIdRef.current = null;
+    }
+  };
 
-  //     // 3. Initiate recording
-  //     const { recording: newRecording } = await Audio.Recording.createAsync(
-  //       Audio.RecordingOptionsPresets.HIGH_QUALITY
-  //     );
-      
-  //     setRecording(newRecording);
-  //     setIsRecording(true);
-  //   } catch (err) {
-  //     console.error('Failed to start recording:', err);
-  //     // Mock mode fallback for smooth development on web or unsupported simulators
-  //     setIsRecording(true);
-  //   }
-  // };
-
-  // const stopRecording = async () => {
-  //   if (!isRecording) return;
-  //   setIsRecording(false);
-
-  //   try {
-  //     let uri = '';
-      
-  //     if (recording) {
-  //       await recording.stopAndUnloadAsync();
-  //       uri = recording.getURI() || '';
-  //       setRecording(null);
-  //     }
-
-  //     // If no valid URI (e.g. simulated mock in simulator/web), run fallback mock
-  //     if (!uri) {
-  //       setIsTranscribing(true);
-  //       // Simulate Whisper transcription delay
-  //       setTimeout(() => {
-  //         setIsTranscribing(false);
-  //         const mockPrompts = [
-  //           "Explain the core features of EYE 1.",
-  //           "Tell me an interesting fact about space.",
-  //           "How do I setup my GROQ key?",
-  //           "Write a React code segment for linear search.",
-  //           "What is the ultimate purpose of artificial intelligence?"
-  //         ];
-  //         const transcriptionText = mockPrompts[Math.floor(Math.random() * mockPrompts.length)];
-  //         setInputText(transcriptionText);
-  //       }, 1500);
-  //       return;
-  //     }
-
-  //     // Send recording file to backend transcribe endpoint
-  //     setIsTranscribing(true);
-  //     const transcribedText = await ApiService.transcribeVoice(uri);
-  //     setIsTranscribing(false);
-
-  //     if (transcribedText) {
-  //       setInputText(transcribedText);
-  //     }
-  //   } catch (err: any) {
-  //     setIsTranscribing(false);
-  //     console.error('Stop recording error:', err);
-  //     Alert.alert('Transcription Failed', err.message || 'Could not transcribe voice audio.');
-  //   }
-  // };
-
-  // Start a fresh, clean chat session
+  // ─── Navigation helpers ───────────────────────────────────────────────────
   const handleNewChat = () => {
     handleStopStreaming();
     setActiveSessionId(null);
-    setStreamingTokens('');
+    setLocalMessages([]);
+    pendingSessionIdRef.current = null;
     toggleDrawer(false);
   };
 
-  // Select a session from the list drawer
   const handleSelectSession = (sessionId: string) => {
     handleStopStreaming();
+    setLocalMessages([]);
+    pendingSessionIdRef.current = null;
     setActiveSessionId(sessionId);
-    setStreamingTokens('');
     toggleDrawer(false);
   };
 
-  // Delete a session with confirmation dialog
   const handleDeleteSession = (sessionId: string, title: string) => {
     Alert.alert(
       'Delete Conversation',
       `Are you sure you want to delete "${title}"?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete', 
+        {
+          text: 'Delete',
           style: 'destructive',
-          onPress: () => deleteSessionMutation.mutate(sessionId)
-        }
+          onPress: () => deleteSessionMutation.mutate(sessionId),
+        },
       ]
     );
   };
 
-  // Compile active messages array (including optimistic updates & live streaming tokens)
-  const getActiveChatMessages = () => {
-    const list = [...messages];
-    if (streamingTokens) {
-      list.push({
-        _id: 'streaming-message',
-        sessionId: activeSessionId || 'new',
-        role: 'assistant',
-        content: streamingTokens,
-        createdAt: new Date().toISOString(),
-      });
-    }
-    return list;
-  };
-
-  // Reanimated sliding styles
+  // ─── Animated drawer style ────────────────────────────────────────────────
   const drawerAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: drawerX.value }],
   }));
 
-  const activeMessagesList = getActiveChatMessages();
-
- 
-
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: activeColors.background }]}>
-      
-      {/* 1. Glassmorphic Custom Header */}
+
+      {/* Header */}
       <View style={[styles.header, { borderBottomColor: activeColors.border }]}>
         <TouchableOpacity onPress={() => toggleDrawer(true)} style={styles.headerButton}>
           <Ionicons name="menu-outline" size={24} color={activeColors.text} />
         </TouchableOpacity>
-        
+
         <View style={styles.headerTitleContainer}>
           <Text style={[styles.headerTitle, { color: activeColors.text }]}>EYE 1</Text>
           <Text style={[styles.headerSubtitle, { color: activeColors.textMuted }]}>
@@ -353,18 +364,21 @@ export default function ChatScreen() {
           </Text>
         </View>
 
-        <TouchableOpacity onPress={() => router.push('/(drawer)/settings')} style={styles.headerButton}>
+        <TouchableOpacity
+          onPress={() => router.push('/(drawer)/settings')}
+          style={styles.headerButton}
+        >
           <Ionicons name="cog-outline" size={24} color={activeColors.text} />
         </TouchableOpacity>
       </View>
 
-      {/* 2. Main Chat Conversation List */}
+      {/* Chat area */}
       <KeyboardAvoidingView
         style={styles.keyboardContainer}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
       >
-        {activeMessagesList.length === 0 && !isAiThinking  ? (
+        {displayMessages.length === 0 && !isAiThinking ? (
           <View style={styles.emptyContainer}>
             <View style={[styles.emptyIconContainer, { borderColor: activeColors.primary }]}>
               <Ionicons name="eye" size={40} color={activeColors.primary} />
@@ -379,7 +393,7 @@ export default function ChatScreen() {
         ) : (
           <FlatList
             ref={flatListRef}
-            data={activeMessagesList}
+            data={displayMessages}
             keyExtractor={(item) => item._id}
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
@@ -392,81 +406,71 @@ export default function ChatScreen() {
             )}
             ListFooterComponent={() => (
               <View>
-                {isAiThinking && <SkeletonLoader />}
-                {isAiStreaming && !streamingTokens && <TypingIndicator />}
+                
+                {isAiStreaming && !displayMessages.find((m) => m._id === 'streaming-message')?.content && (
+                  <TypingIndicator />
+                )}
               </View>
             )}
           />
         )}
 
-        {/* 3. Speech Transcription Loading Spinner */}
-        {/* {isTranscribing && (
-          <View style={styles.transcribingLoader}>
-            <ActivityIndicator size="small" color={activeColors.primary} />
-            <Text style={[styles.transcribingText, { color: activeColors.textMuted }]}>
-              Transcribing voice via Whisper Large...
-            </Text>
+        {/* Input bar */}
+        <View
+          style={[
+            styles.inputBar,
+            {
+              borderTopColor: activeColors.border,
+              backgroundColor: activeColors.background,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.inputWrapper,
+              {
+                backgroundColor: activeColors.inputBackground,
+                borderColor: activeColors.border,
+              },
+            ]}
+          >
+            <TextInput
+              style={[styles.textInput, { color: activeColors.text }]}
+              value={inputText}
+              onChangeText={setInputText}
+              placeholder="Message EYE 1..."
+              placeholderTextColor={activeColors.textMuted}
+              multiline
+              editable={!isAiStreaming}
+            />
           </View>
-        )} */}
 
-{/* 4. Footer Message Inputs Bar */}
-<View
-  style={[
-    styles.inputBar,
-    {
-      borderTopColor: activeColors.border,
-      backgroundColor: activeColors.background,
-    },
-  ]}
->
-  <View
-    style={[
-      styles.inputWrapper,
-      {
-        backgroundColor: activeColors.inputBackground,
-        borderColor: activeColors.border,
-      },
-    ]}
-  >
-    <TextInput
-      style={[styles.textInput, { color: activeColors.text }]}
-      value={inputText}
-      onChangeText={setInputText}
-      placeholder="Message EYE 1..."
-      placeholderTextColor={activeColors.textMuted}
-      multiline
-      editable={!isAiStreaming}
-    />
-  </View>
-
-  {isAiStreaming ? (
-    <TouchableOpacity
-      onPress={handleStopStreaming}
-      style={[styles.sendButton, { backgroundColor: '#EF4444' }]}
-    >
-      <Ionicons name="stop" size={18} color="#FFF" />
-    </TouchableOpacity>
-  ) : (
-    <TouchableOpacity
-      onPress={() => handleSendMessage()}
-      disabled={!inputText.trim()}
-      style={[
-        styles.sendButton,
-        {
-          backgroundColor: inputText.trim()
-            ? activeColors.primary
-            : activeColors.border,
-          opacity: inputText.trim() ? 1 : 0.6,
-        },
-      ]}
-    >
-      <Ionicons name="arrow-up" size={18} color="#FFF" />
-    </TouchableOpacity>
-  )}
-</View>
+          {isAiStreaming ? (
+            <TouchableOpacity
+              onPress={handleStopStreaming}
+              style={[styles.sendButton, { backgroundColor: '#EF4444' }]}
+            >
+              <Ionicons name="stop" size={18} color="#FFF" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={() => handleSendMessage()}
+              disabled={!inputText.trim()}
+              style={[
+                styles.sendButton,
+                {
+                  backgroundColor: inputText.trim() ? activeColors.primary : activeColors.border,
+                  opacity: inputText.trim() ? 1 : 0.6,
+                },
+              ]}
+            >
+              <Ionicons name="arrow-up" size={18} color="#FFF" />
+            </TouchableOpacity>
+          )}
+        </View>
       </KeyboardAvoidingView>
 
-      {/* 5. Custom Slide-out Left Drawer Overlay */}
+      {/* Drawer backdrop */}
       {isDrawerOpen && (
         <TouchableOpacity
           activeOpacity={1}
@@ -475,140 +479,145 @@ export default function ChatScreen() {
         />
       )}
 
-{isDrawerOpen && (
-  <Animated.View
-    style={[
-      styles.drawer,
-      { backgroundColor: activeColors.card },
-      drawerAnimatedStyle,
-    ]}
-  >
-         <SafeAreaView style={styles.drawerSafe}>
-          {/* New Chat Button */}
-          <TouchableOpacity 
-            onPress={handleNewChat}
-            style={[styles.newChatBtn, { borderColor: activeColors.primary, backgroundColor: activeColors.primaryGlow }]}
-          >
-            <Ionicons name="add" size={18} color={activeColors.primary} />
-            <Text style={[styles.newChatText, { color: activeColors.primary }]}>New Chat</Text>
-          </TouchableOpacity>
+      {/* Drawer */}
+      {isDrawerOpen && (
+        <Animated.View
+          style={[styles.drawer, { backgroundColor: activeColors.card }, drawerAnimatedStyle]}
+        >
+          <SafeAreaView style={styles.drawerSafe}>
+            <TouchableOpacity
+              onPress={handleNewChat}
+              style={[
+                styles.newChatBtn,
+                { borderColor: activeColors.primary, backgroundColor: activeColors.primaryGlow },
+              ]}
+            >
+              <Ionicons name="add" size={18} color={activeColors.primary} />
+              <Text style={[styles.newChatText, { color: activeColors.primary }]}>New Chat</Text>
+            </TouchableOpacity>
 
-          {/* Session List Title */}
-          <Text style={[styles.sessionsHeader, { color: activeColors.textMuted }]}>
-            Recent Chats
-          </Text>
-
-          {/* Session Items scroll viewport */}
-          {isLoadingSessions ? (
-            <ActivityIndicator style={{ marginTop: Spacing.four }} color={activeColors.primary} />
-          ) : sessions.length === 0 ? (
-            <Text style={[styles.noSessionsText, { color: activeColors.textMuted }]}>
-              No previous chats
+            <Text style={[styles.sessionsHeader, { color: activeColors.textMuted }]}>
+              Recent Chats
             </Text>
-          ) : (
-            <FlatList
-              data={sessions}
-              keyExtractor={(item) => item._id}
-              contentContainerStyle={styles.drawerList}
-              renderItem={({ item }) => {
-                const isActive = item._id === activeSessionId;
-                const dateText = new Date(item.updatedAt).toLocaleDateString([], { 
-                  month: 'short', 
-                  day: 'numeric' 
-                });
-                return (
-                  <View style={[styles.sessionRow, isActive && { backgroundColor: activeColors.background }]}>
-                    <TouchableOpacity 
-                      style={styles.sessionClickArea}
-                      onPress={() => handleSelectSession(item._id)}
+
+            {isLoadingSessions ? (
+              <ActivityIndicator style={{ marginTop: Spacing.four }} color={activeColors.primary} />
+            ) : sessions.length === 0 ? (
+              <Text style={[styles.noSessionsText, { color: activeColors.textMuted }]}>
+                No previous chats
+              </Text>
+            ) : (
+              <FlatList
+                data={sessions}
+                keyExtractor={(item) => item._id}
+                contentContainerStyle={styles.drawerList}
+                renderItem={({ item }) => {
+                  const isActive = item._id === activeSessionId;
+                  const dateText = new Date(item.updatedAt).toLocaleDateString([], {
+                    month: 'short',
+                    day: 'numeric',
+                  });
+                  return (
+                    <View
+                      style={[
+                        styles.sessionRow,
+                        isActive && { backgroundColor: activeColors.background },
+                      ]}
                     >
-                      <Ionicons name="chatbox-outline" size={16} color={isActive ? activeColors.primary : activeColors.textMuted} />
-                      <View style={styles.sessionMeta}>
-                        <Text 
-                          style={[
-                            styles.sessionTitle, 
-                            { color: activeColors.text }, 
-                            isActive && { fontWeight: Typography.weight.semibold }
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item.title}
-                        </Text>
-                        <Text style={[styles.sessionTime, { color: activeColors.textMuted }]}>
-                          {dateText}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity 
-                      onPress={() => handleDeleteSession(item._id, item.title)}
-                      style={styles.sessionDeleteBtn}
-                    >
-                      <Ionicons name="trash-outline" size={14} color="#EF4444" />
-                    </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.sessionClickArea}
+                        onPress={() => handleSelectSession(item._id)}
+                      >
+                        <Ionicons
+                          name="chatbox-outline"
+                          size={16}
+                          color={isActive ? activeColors.primary : activeColors.textMuted}
+                        />
+                        <View style={styles.sessionMeta}>
+                          <Text
+                            style={[
+                              styles.sessionTitle,
+                              { color: activeColors.text },
+                              isActive && { fontWeight: Typography.weight.semibold },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.title}
+                          </Text>
+                          <Text style={[styles.sessionTime, { color: activeColors.textMuted }]}>
+                            {dateText}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => handleDeleteSession(item._id, item.title)}
+                        style={styles.sessionDeleteBtn}
+                      >
+                        <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                }}
+              />
+            )}
+
+            {user && (
+              <View style={[styles.drawerUserFooter, { borderTopColor: activeColors.border }]}>
+                <View style={styles.userProfileMeta}>
+                  <View style={[styles.userAvatar, { backgroundColor: activeColors.primaryGlow }]}>
+                    <Text style={[styles.avatarLetter, { color: activeColors.primary }]}>
+                      {user.name.charAt(0).toUpperCase()}
+                    </Text>
                   </View>
-                );
-              }}
-            />
-          )}
+                  <View style={styles.userNameBlock}>
+                    <Text
+                      style={[styles.userNameText, { color: activeColors.text }]}
+                      numberOfLines={1}
+                    >
+                      {user.name}
+                    </Text>
+                    <Text
+                      style={[styles.userEmailText, { color: activeColors.textMuted }]}
+                      numberOfLines={1}
+                    >
+                      {user.email}
+                    </Text>
+                  </View>
+                </View>
 
-          {/* Bottom active User profile section */}
-          {user && (
-            <View style={[styles.drawerUserFooter, { borderTopColor: activeColors.border }]}>
-              <View style={styles.userProfileMeta}>
-                <View style={[styles.userAvatar, { backgroundColor: activeColors.primaryGlow }]}>
-                  <Text style={[styles.avatarLetter, { color: activeColors.primary }]}>
-                    {user.name.charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-                <View style={styles.userNameBlock}>
-                  <Text style={[styles.userNameText, { color: activeColors.text }]} numberOfLines={1}>
-                    {user.name}
-                  </Text>
-                  <Text style={[styles.userEmailText, { color: activeColors.textMuted }]} numberOfLines={1}>
-                    {user.email}
-                  </Text>
-                </View>
+                <TouchableOpacity onPress={() => logout()} style={styles.logoutBtn}>
+                  <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+                </TouchableOpacity>
               </View>
-              
-              <TouchableOpacity onPress={() => logout()} style={styles.logoutBtn}>
-                <Ionicons name="log-out-outline" size={20} color="#EF4444" />
-              </TouchableOpacity>
-            </View>
-          )}
-        </SafeAreaView>
-</Animated.View>
-)}
-
-
+            )}
+          </SafeAreaView>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
- header: {
-  minHeight: 64,
-  paddingTop: 10,
-  paddingBottom: 6,
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  paddingHorizontal: Spacing.four,
-  borderBottomWidth: StyleSheet.hairlineWidth,
-},
-headerButton: {
-  width: 42,
-  height: 42,
-  borderRadius: 21,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
-  headerTitleContainer: {
+  container: { flex: 1 },
+  header: {
+    minHeight: 64,
+    paddingTop: 10,
+    paddingBottom: 6,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.four,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  headerButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitleContainer: { alignItems: 'center' },
   headerTitle: {
     fontSize: Typography.size.base,
     fontWeight: Typography.weight.bold,
@@ -621,12 +630,8 @@ headerButton: {
     letterSpacing: 1,
     marginTop: 1,
   },
-  keyboardContainer: {
-    flex: 1,
-  },
-  listContent: {
-    paddingVertical: Spacing.three,
-  },
+  keyboardContainer: { flex: 1 },
+  listContent: { paddingVertical: Spacing.three },
   emptyContainer: {
     flex: 1,
     alignItems: 'center',
@@ -660,7 +665,7 @@ headerButton: {
     alignItems: 'flex-end',
     gap: Spacing.two,
     borderTopWidth: StyleSheet.hairlineWidth,
-},
+  },
   inputWrapper: {
     flex: 1,
     flexDirection: 'row',
@@ -683,17 +688,15 @@ headerButton: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
-  // Custom Drawer Styling
- drawerBackdrop: {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: 'rgba(0,0,0,0.5)',
-  zIndex: 90,
-},
+  drawerBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 90,
+  },
   drawer: {
     position: 'absolute',
     left: 0,
@@ -701,7 +704,7 @@ headerButton: {
     bottom: 0,
     width: DRAWER_WIDTH,
     zIndex: 1000,
-    elevation: 40,   
+    elevation: 40,
     shadowColor: '#000',
     shadowOffset: { width: 4, height: 0 },
     shadowOpacity: 0.25,
@@ -739,9 +742,7 @@ headerButton: {
     paddingLeft: Spacing.two,
     marginTop: Spacing.two,
   },
-  drawerList: {
-    paddingVertical: Spacing.one,
-  },
+  drawerList: { paddingVertical: Spacing.one },
   sessionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -756,17 +757,12 @@ headerButton: {
     padding: Spacing.three,
     gap: Spacing.three,
   },
-  sessionMeta: {
-    flex: 1,
-  },
+  sessionMeta: { flex: 1 },
   sessionTitle: {
     fontSize: Typography.size.sm,
     fontWeight: Typography.weight.medium,
   },
-  sessionTime: {
-    fontSize: 9,
-    marginTop: 2,
-  },
+  sessionTime: { fontSize: 9, marginTop: 2 },
   sessionDeleteBtn: {
     width: 28,
     height: 28,
@@ -799,16 +795,12 @@ headerButton: {
     fontSize: Typography.size.base,
     fontWeight: Typography.weight.bold,
   },
-  userNameBlock: {
-    flex: 1,
-  },
+  userNameBlock: { flex: 1 },
   userNameText: {
     fontSize: Typography.size.sm,
     fontWeight: Typography.weight.semibold,
   },
-  userEmailText: {
-    fontSize: 10,
-  },
+  userEmailText: { fontSize: 10 },
   logoutBtn: {
     width: 36,
     height: 36,
