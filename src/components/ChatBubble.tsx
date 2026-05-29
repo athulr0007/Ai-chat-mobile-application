@@ -122,10 +122,38 @@ export default function ChatBubble({ role, content, createdAt }: ChatBubbleProps
     {content}
   </Text>
 
-  <View style={[styles.actionsRow, { borderTopColor: activeColors.border }]}>
-    <Text style={[styles.timeText, { color: activeColors.textMuted }]}>
-      {formattedTime}
-    </Text>
+ <View style={[styles.actionsRow, { borderTopColor: activeColors.border }]}>
+  <Text style={[styles.timeText, { color: activeColors.textMuted }]}>
+    {formattedTime}
+  </Text>
+
+  <View style={styles.actionButtons}>
+    <TouchableOpacity
+      onPress={() => {
+        Clipboard.setString(content);
+        Alert.alert('Copied', 'Message copied to clipboard');
+      }}
+      style={[
+        styles.ttsButton,
+        { backgroundColor: activeColors.background },
+      ]}
+      activeOpacity={0.7}
+    >
+      <Ionicons
+        name="copy-outline"
+        size={14}
+        color={activeColors.primary}
+      />
+
+      <Text
+        style={[
+          styles.ttsText,
+          { color: activeColors.primary },
+        ]}
+      >
+        Copy
+      </Text>
+    </TouchableOpacity>
 
     <TouchableOpacity
       onPress={handleTTS}
@@ -155,6 +183,7 @@ export default function ChatBubble({ role, content, createdAt }: ChatBubbleProps
       </Text>
     </TouchableOpacity>
   </View>
+</View>
 </View>
         )}
       </View>
@@ -193,6 +222,11 @@ const styles = StyleSheet.create({
   markdownContainer: {
     width: '100%',
   },
+  actionButtons: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+},
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -221,7 +221,7 @@ const success = await login(
           {/* Back Button */}
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => router.replace('/(auth)/welcome')}
           >
             <Text
               style={[
