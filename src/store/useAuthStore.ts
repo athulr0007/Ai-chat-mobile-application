@@ -41,8 +41,7 @@ interface AuthState {
 
 // Configurable Backend API host (Change to match development host)
 // export const BACKEND_URL = 'http://localhost:5000';
-export const BACKEND_URL = "http://10.0.2.2:5000";
-
+export const BACKEND_URL = "https://eye1.onrender.com";
 export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   user: null,
